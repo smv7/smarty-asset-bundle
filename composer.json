@@ -1,0 +1,63 @@
+{
+    "name": "smv7/smarty-asset-bundle",
+    "time": "2026-01-24",
+    "description": "Asset bundle combiner and minifier for Smarty 5.7.0 with HTTP/3 preload support and APCu learning system",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Vital Smereka",
+            "email": "vds911@yandex.ru"
+        }
+    ],
+    "homepage": "https://github.com/smv7/smarty-asset-bundle",
+    "keywords": [
+        "smarty",
+        "assets",
+        "bundle",
+        "combiner",
+        "minify",
+        "preload",
+        "http2",
+        "http3",
+        "apcu",
+        "optimization",
+        "performance",
+        "speed",
+        "cache"
+    ],
+    "require": {
+        "php": "^8.5",
+        "ext-apcu": "*",
+        "smarty/smarty": "^5.7",
+        "wikimedia/minify": "^2.10"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "SmartyBundler\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "SmartyBundler\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit --testsuite=full",
+        "test-unit": "phpunit --testsuite=unit",
+        "test-integration": "phpunit --testsuite=integration",
+        "test-coverage": "phpunit --coverage-html coverage --testsuite=full",
+        "check-apcu": "@php -r \"if (!extension_loaded('apcu')) { echo 'ERROR: APCu extension is required!'; exit(1); } echo 'APCu extension is loaded.';\"",
+        "post-install-cmd": [
+            "@php -r \"if (!extension_loaded('apcu')) { echo '\\n\\033[1;31mERROR: APCu extension is required for smv7/smarty-asset-bundle\\033[0m\\n'; echo 'Please install APCu: https://www.php.net/manual/en/apcu.installation.php\\n'; exit(1); }\""
+        ],
+        "post-update-cmd": [
+            "@php -r \"if (!extension_loaded('apcu')) { echo '\\n\\033[1;31mERROR: APCu extension is required for smv7/smarty-asset-bundle\\033[0m\\n'; echo 'Please install APCu: https://www.php.net/manual/en/apcu.installation.php\\n'; exit(1); }\""
+        ]
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
