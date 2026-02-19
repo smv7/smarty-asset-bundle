@@ -1,4 +1,4 @@
-# Smarty Asset Bundle
+# Smarty 5 Asset Bundle
 
 Combine, minify and preload CSS/JS assets in Smarty 5 with zero‑blocking and automatic HTTP/3 `Link` headers.
 
