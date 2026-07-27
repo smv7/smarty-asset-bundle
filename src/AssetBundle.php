@@ -1,5 +1,5 @@
 <?php
-// src/AssetBundle.php
+
 namespace SmartyBundler;
 
 class AssetBundle
@@ -9,6 +9,7 @@ class AssetBundle
     private CacheManager $cacheManager;
     private string $documentRoot;
     private string $resourceBasePath;
+	private array $warnedFiles = [];
 
     public function __construct(array $config = [])
     {
@@ -72,7 +73,6 @@ class AssetBundle
 
         foreach ($absoluteFiles as $file) {
             if (!file_exists($file)) {
-                trigger_error("SmartyBundle: File not found: {$file}", \E_USER_WARNING);
                 return $this->generateSourceFilesHtml($files, $type, array_merge($options, ['cache_buster' => time()]));
             }
         }
@@ -116,6 +116,10 @@ class AssetBundle
         foreach ($originalFiles as $originalFile) {
             $absolutePath = $this->resolveFilePath($originalFile);
             if (!file_exists($absolutePath)) {
+                if (!in_array($absolutePath, $this->warnedFiles, true)) {
+					trigger_error("SmartyBundle: File not found: {$absolutePath}", E_USER_WARNING);
+					$this->warnedFiles[] = $absolutePath;
+				}
                 continue;
             }
             $url = $this->getResourceUrl($absolutePath);
