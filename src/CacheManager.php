@@ -1,5 +1,4 @@
 <?php
-// src/CacheManager.php
 
 namespace SmartyBundler;
 
@@ -8,6 +7,8 @@ use Wikimedia\Minify\JavaScriptMinifier;
 
 class CacheManager
 {
+    private const TMP_TTL = 300;
+
     private string $cacheDir;
 
     public function __construct(string $cacheDir)
@@ -55,13 +56,26 @@ class CacheManager
 
     public function saveCache(string $cacheKey, string $type, string $content): bool
     {
-        $filePath = $this->cacheDir . '/' . $cacheKey . '.' . $type;
-        $tempFile = $filePath . '.tmp';
-        if (file_put_contents($tempFile, $content) !== false) {
-            return rename($tempFile, $filePath);
+        $tempFile = $this->makeTempPath($cacheKey, $type);
+
+        if (@file_put_contents($tempFile, $content) === false) {
+            @unlink($tempFile);
+            return false;
         }
 
-        return false;
+        $finalFile = $this->cacheDir . '/' . $cacheKey . '.' . $type;
+
+        if (!file_exists($tempFile)) {
+            return false;
+        }
+
+        $result = @rename($tempFile, $finalFile);
+
+        if (!$result) {
+            @unlink($tempFile);
+        }
+
+        return (bool) $result;
     }
 
     public function generateAndSaveCache(array $files, string $cacheKey, string $type, array $options = []): bool
@@ -99,9 +113,9 @@ class CacheManager
      */
     private function saveCacheAtomic(string $cacheKey, string $type, string $content): bool
     {
-        $tempFile = $this->cacheDir . '/' . $cacheKey . '.' . $type . '.tmp_' . getmypid();
+        $tempFile = $this->makeTempPath($cacheKey, $type);
 
-        if (file_put_contents($tempFile, $content) === false) {
+        if (@file_put_contents($tempFile, $content) === false) {
             @unlink($tempFile);
             return false;
         }
@@ -113,18 +127,21 @@ class CacheManager
             return true;
         }
 
-        $result = rename($tempFile, $finalFile);
+        if (!file_exists($tempFile)) {
+            return false;
+        }
+
+        $result = @rename($tempFile, $finalFile);
 
         if (!$result) {
             @unlink($tempFile);
         }
 
-        return $result;
+        return (bool) $result;
     }
 
-
     /**
-     *  fastcgi_finish_request для фоновой задачи
+     * fastcgi_finish_request для фоновой задачи
      */
     public function scheduleCacheGeneration($source, string $cacheKey, string $type, array $options = []): void
     {
@@ -146,7 +163,7 @@ class CacheManager
                 return;
             }
 
-            $tempFile = $this->cacheDir . '/' . $cacheKey . '.' . $type . '.tmp_' . getmypid();
+            $tempFile = $this->makeTempPath($cacheKey, $type);
 
             try {
                 if (is_array($source)) {
@@ -163,53 +180,75 @@ class CacheManager
                         }
                     }
 
-                    if (!empty($content)) {
-                        $content = $this->minify($content, $type);
-                        file_put_contents($tempFile, $content);
+                    if (empty($content)) {
+                        return;
+                    }
+
+                    $content = $this->minify($content, $type);
+
+                    if (@file_put_contents($tempFile, $content) === false) {
+                        return;
                     }
                 } else {
-                    $content = (string)$source;
+                    $content = (string) $source;
                     if (!($options['bundle_disable'] ?? false)) {
                         $content = $this->minify($content, $type);
                     }
 
                     $comment = "/* Generated from string bundle on " . date('Y-m-d H:i:s') . " */\n";
-                    file_put_contents($tempFile, $comment . $content);
+
+                    if (@file_put_contents($tempFile, $comment . $content) === false) {
+                        return;
+                    }
                 }
 
                 $finalFile = $this->cacheDir . '/' . $cacheKey . '.' . $type;
 
-                if (!file_exists($finalFile)) {
-                    rename($tempFile, $finalFile);
-                } else {
+                if (file_exists($finalFile)) {
                     @unlink($tempFile);
+                    return;
                 }
+
+                if (!file_exists($tempFile)) {
+                    return;
+                }
+
+                @rename($tempFile, $finalFile);
             } catch (\Exception $e) {
                 error_log("AssetBundle async cache generation failed: " . $e->getMessage());
                 @unlink($tempFile);
             } finally {
-                $this->cleanupTempFiles($cacheKey, $type);
+                $this->cleanupTempFiles();
             }
         });
     }
 
     /**
-     * Очистка временных файлов текущего процесса
+     * Уникальный путь для временного файла
      */
-    private function cleanupTempFiles(string $cacheKey, string $type): void
+    private function makeTempPath(string $cacheKey, string $type): string
     {
-        $pattern = $this->cacheDir . '/' . $cacheKey . '.' . $type . '.tmp_*';
-        $files = glob($pattern);
+        return $this->cacheDir . '/' . $cacheKey . '.' . $type
+            . '.tmp_' . getmypid() . '_' . uniqid('', true);
+    }
 
-        if ($files) {
-            $currentPid = getmypid();
-            foreach ($files as $file) {
-                if (preg_match('/\.tmp_(\d+)$/', $file, $matches)) {
-                    $filePid = (int)$matches[1];
-                    if ($filePid != $currentPid) {
-                        @unlink($file);
-                    }
-                }
+    /**
+     * Удаление устаревших временных файлов.
+     * Живые tmp-файлы параллельных воркеров НЕ трогаем.
+     */
+    private function cleanupTempFiles(): void
+    {
+        $files = glob($this->cacheDir . '/*.tmp_*');
+
+        if (!$files) {
+            return;
+        }
+
+        $now = time();
+
+        foreach ($files as $file) {
+            if (is_file($file) && ($now - filemtime($file)) > self::TMP_TTL) {
+                @unlink($file);
             }
         }
     }
@@ -229,9 +268,21 @@ class CacheManager
 
     public function clearCache(): void
     {
-        $files = glob($this->cacheDir . '/*.{css,js,tmp,lock}', GLOB_BRACE);
-        foreach ($files as $file) {
-            @unlink($file);
+        $patterns = [
+            $this->cacheDir . '/*.{css,js}',
+            $this->cacheDir . '/*.tmp_*',
+        ];
+
+        foreach ($patterns as $pattern) {
+            $files = glob($pattern, GLOB_BRACE);
+            if (!$files) {
+                continue;
+            }
+            foreach ($files as $file) {
+                if (is_file($file)) {
+                    @unlink($file);
+                }
+            }
         }
     }
 
@@ -279,9 +330,9 @@ class CacheManager
         $comment = "/* Generated from string bundle on " . date('Y-m-d H:i:s') . " */\n";
         $content = $comment . $content;
 
-        $tempFile = $this->cacheDir . '/' . $cacheKey . '.' . $type . '.tmp_' . getmypid();
+        $tempFile = $this->makeTempPath($cacheKey, $type);
 
-        if (file_put_contents($tempFile, $content) === false) {
+        if (@file_put_contents($tempFile, $content) === false) {
             @unlink($tempFile);
             return false;
         }
@@ -290,15 +341,18 @@ class CacheManager
 
         if (file_exists($finalFile)) {
             @unlink($tempFile);
-
             return true;
         }
 
-        $result = rename($tempFile, $finalFile);
+        if (!file_exists($tempFile)) {
+            return false;
+        }
+
+        $result = @rename($tempFile, $finalFile);
         if (!$result) {
             @unlink($tempFile);
         }
 
-        return $result;
+        return (bool) $result;
     }
 }

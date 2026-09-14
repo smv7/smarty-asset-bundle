@@ -1,6 +1,5 @@
 {
     "name": "smv7/smarty-asset-bundle",
-    "time": "2026-01-24",
     "description": "Asset bundle combiner and minifier for Smarty 5.7.0 with HTTP/3 preload support and APCu learning system",
     "type": "library",
     "license": "MIT",
