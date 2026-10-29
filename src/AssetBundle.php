@@ -1,5 +1,10 @@
 <?php
 
+/**
+ * This file is part of the CMS Donate Engine package.
+ * @copyright (c) 2025-2026 Vital Smereka (https://cde.by)
+ */
+
 namespace SmartyBundler;
 
 class AssetBundle
@@ -9,7 +14,8 @@ class AssetBundle
     private CacheManager $cacheManager;
     private string $documentRoot;
     private string $resourceBasePath;
-	private array $warnedFiles = [];
+    private string $documentUrl;
+    private array $warnedFiles = [];
 
     public function __construct(array $config = [])
     {
@@ -30,6 +36,7 @@ class AssetBundle
         $this->config['cache_url'] = rtrim($this->config['cache_url'], '/') . '/';
         $this->documentRoot = rtrim(str_replace('\\', '/', $this->config['document_root']), '/');
         $this->resourceBasePath = dirname($this->config['cache_dir']);
+        $this->documentUrl = $this->computeDocumentUrl();
 
         $this->preloadManager = new PreloadManager($this->config['enable_apcu']);
         $this->cacheManager = new CacheManager($this->config['cache_dir']);
@@ -117,9 +124,9 @@ class AssetBundle
             $absolutePath = $this->resolveFilePath($originalFile);
             if (!file_exists($absolutePath)) {
                 if (!in_array($absolutePath, $this->warnedFiles, true)) {
-					trigger_error("SmartyBundle: File not found: {$absolutePath}", E_USER_WARNING);
-					$this->warnedFiles[] = $absolutePath;
-				}
+                    trigger_error("SmartyBundle: File not found: {$absolutePath}", E_USER_WARNING);
+                    $this->warnedFiles[] = $absolutePath;
+                }
                 continue;
             }
             $url = $this->getResourceUrl($absolutePath);
@@ -142,17 +149,35 @@ class AssetBundle
     }
 
     /**
-     * Вспомогательный метод для получения URL ресурса
+     * Вычисляет корневой URL для document_root.
+     * Отрезает от cache_url относительный путь resourceBasePath относительно document_root.
+     */
+    private function computeDocumentUrl(): string
+    {
+        $baseRel = $this->makeRelativePathFromResourceBase($this->resourceBasePath, $this->documentRoot);
+        if ($baseRel === null || $baseRel === '') {
+            return '/';
+        }
+
+        $cacheUrl = rtrim($this->config['cache_url'], '/');
+        $suffix = '/' . ltrim($baseRel, '/');
+
+        if (!str_ends_with($cacheUrl, $suffix)) {
+            return '/';
+        }
+
+        return rtrim(substr($cacheUrl, 0, -strlen($suffix)), '/') . '/';
+    }
+
+    /**
+     * Вспомогательный метод для получения URL ресурса.
+     * Все файлы резолвятся относительно document_root.
      */
     private function getResourceUrl(string $absoluteResourcePath): string
     {
-        $relPathFromResourceBase = $this->makeRelativePathFromResourceBase($absoluteResourcePath, $this->resourceBasePath);
+        $rel = $this->makeRelativePathFromResourceBase($absoluteResourcePath, $this->documentRoot);
 
-        if ($relPathFromResourceBase === null) {
-            return '';
-        }
-
-        return $this->config['cache_url'] . ltrim($relPathFromResourceBase, '/');
+        return $rel === null ? '' : $this->documentUrl . ltrim($rel, '/');
     }
 
     /**
@@ -225,10 +250,9 @@ class AssetBundle
         if (str_starts_with($file, '/') || preg_match('/^[a-zA-Z]:\//', $file)) {
             return $file;
         }
-        
+
         return $this->documentRoot . '/' . ltrim($file, '/');
     }
-
 
     /**
      * Определяет тип контента (CSS или JS) по его содержимому
@@ -237,7 +261,6 @@ class AssetBundle
     {
         $content = trim($content);
 
-        // JS-индикаторы
         $jsPatterns = [
             '/^\s*<script/i',
             '/function\s*\(/',
@@ -257,7 +280,6 @@ class AssetBundle
             }
         }
 
-        // CSS-индикаторы
         $cssPatterns = [
             '/^\s*[.#\[a-z][^{]*\{[^}]*\}/ims',
             '/@media/',
@@ -274,7 +296,6 @@ class AssetBundle
             }
         }
 
-        // По умолчанию считаем CSS (менее рискованно)
         return 'css';
     }
 
@@ -283,22 +304,18 @@ class AssetBundle
      */
     private function processContentBundle(string $content, array $options): string
     {
-        // Определяем тип
         $type = $options['type'] ?? $this->detectContentType($content);
 
         if (!in_array($type, ['css', 'js'])) {
             return $this->wrapInlineContent($content, 'css', $options);
         }
 
-        // Санитизация контента
         $content = $this->sanitizeContent($content, $type);
 
-        // Проверяем, есть ли уже кеш
         $cacheKey = $this->cacheManager->generateContentCacheKey($content, $options, $type);
         $cachedPath = $this->cacheManager->getCachedFilePath($cacheKey, $type, $options);
 
         if ($cachedPath !== null) {
-            // Кеш существует - возвращаем ссылку на файл
             $url = $this->getResourceUrl($cachedPath);
             $html = $this->generateHtmlTag($type, $url, $options);
 
@@ -310,7 +327,6 @@ class AssetBundle
             return $html;
         }
 
-        // Кеша нет - возвращаем инлайн-контент и планируем фоновую генерацию
         $this->cacheManager->scheduleCacheGeneration($content, $cacheKey, $type, $options);
         return $this->wrapInlineContent($content, $type, $options);
     }
@@ -321,9 +337,9 @@ class AssetBundle
     private function sanitizeContent(string $content, string $type): string
     {
         $replacements = [
-            "\0" => '', // Null-байты
-            "\r" => '', // Возврат каретки
-            "\t" => ' ', // Табы
+            "\0" => '',
+            "\r" => '',
+            "\t" => ' ',
         ];
 
         $content = strtr($content, $replacements);
@@ -367,7 +383,7 @@ class AssetBundle
 
             return "<style{$attrString}>" . $safeContent . "</style>\n";
         }
-        
+
         if ($type === 'js') {
             $attributes = [];
             if (isset($options['defer']) && $options['defer']) {
@@ -381,7 +397,7 @@ class AssetBundle
 
             return "<script{$attrString}>" . $safeContent . "</script>\n";
         }
-        
+
         return '';
     }
 }

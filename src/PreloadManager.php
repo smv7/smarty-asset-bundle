@@ -1,5 +1,9 @@
 <?php
-// src/PreloadManager.php
+
+/**
+ * This file is part of the CMS Donate Engine package.
+ * @copyright (c) 2025-2026 Vital Smereka (https://cde.by)
+ */
 
 namespace SmartyBundler;
 
