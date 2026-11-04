@@ -73,14 +73,15 @@ class AssetBundle
 
         $type = $options['type'] ?? $firstType;
         $absoluteFiles = array_map([$this, 'resolveFilePath'], $files);
+        $cacheBuster   = $this->computeFilesCacheBuster($absoluteFiles);
 
         if (!empty($options['bundle_disable'])) {
-            return $this->generateSourceFilesHtml($files, $type, array_merge($options, ['cache_buster' => time()]));
+            return $this->generateSourceFilesHtml($files, $type, array_merge($options, ['cache_buster' => $cacheBuster]));
         }
 
         foreach ($absoluteFiles as $file) {
             if (!file_exists($file)) {
-                return $this->generateSourceFilesHtml($files, $type, array_merge($options, ['cache_buster' => time()]));
+                return $this->generateSourceFilesHtml($files, $type, array_merge($options, ['cache_buster' => $cacheBuster]));
             }
         }
 
@@ -89,6 +90,10 @@ class AssetBundle
 
         if ($cachedPath !== null) {
             $url = $this->getResourceUrl($cachedPath);
+            if ($cacheBuster > 0) {
+                $delimiter = strpos($url, '?') !== false ? '&' : '?';
+                $url .= $delimiter . 'cb=' . urlencode((string) $cacheBuster);
+            }
             $html = $this->generateHtmlTag($type, $url, $options);
 
             if (!empty($options['preload']) && $this->preloadManager->isEnabled()) {
@@ -98,7 +103,7 @@ class AssetBundle
             return $html;
         }
 
-        $output = $this->generateSourceFilesHtml($files, $type, array_merge($options, ['cache_buster' => time()]));
+        $output = $this->generateSourceFilesHtml($files, $type, array_merge($options, ['cache_buster' => $cacheBuster]));
         $this->cacheManager->scheduleCacheGeneration($absoluteFiles, $cacheKey, $type, $options);
 
         return $output;
@@ -252,6 +257,24 @@ class AssetBundle
         }
 
         return $this->documentRoot . '/' . ltrim($file, '/');
+    }
+
+    /**
+     * Cache-buster на основе времени модификации самого свежего файла в наборе.
+     * Стабилен между рендерами, пока входные файлы не менялись.
+     * Меняется при правке любого из входных файлов → браузер гарантированно
+     * подхватывает новую версию, но не сбрасывает кэш на каждом рендере.
+     */
+    private function computeFilesCacheBuster(array $absoluteFiles): int
+    {
+        $max = 0;
+        foreach ($absoluteFiles as $file) {
+            $t = @filemtime($file);
+            if ($t !== false && $t > $max) {
+                $max = $t;
+            }
+        }
+        return $max;
     }
 
     /**
