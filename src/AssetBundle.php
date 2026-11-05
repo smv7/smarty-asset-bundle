@@ -98,7 +98,7 @@ class AssetBundle
 
             if (!empty($options['preload']) && $this->preloadManager->isEnabled()) {
                 $size = @filesize($cachedPath) ?: 0;
-                $this->preloadManager->registerBundleForLearning($cacheKey, $type, $url, $size);
+                $this->preloadManager->registerBundleForLearning($cacheKey, $type, $url, $size, $cachedPath);
             }
             return $html;
         }
@@ -344,7 +344,7 @@ class AssetBundle
 
             if (!empty($options['preload']) && $this->preloadManager->isEnabled()) {
                 $size = @filesize($cachedPath) ?: 0;
-                $this->preloadManager->registerBundleForLearning($cacheKey, $type, $url, $size);
+                $this->preloadManager->registerBundleForLearning($cacheKey, $type, $url, $size, $cachedPath);
             }
 
             return $html;

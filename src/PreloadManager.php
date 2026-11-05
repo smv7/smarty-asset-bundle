@@ -25,48 +25,78 @@ class PreloadManager
         }
 
         $apcuKey = 'sab_template_' . md5($this->currentTemplate);
-        $cached = \apcu_fetch($apcuKey);
+        $cached  = \apcu_fetch($apcuKey);
 
-        if ($cached !== false && is_array($cached)) {
-            $headers = [];
-            foreach ($cached as $bundle) {
-                if (isset($bundle['url']) && isset($bundle['as'])) {
-                    $headers[] = "<{$bundle['url']}>; rel=preload; as={$bundle['as']}";
-                }
+        if ($cached === false || !is_array($cached)) {
+            return;
+        }
+
+        $headers = [];
+        $valid   = [];
+        $changed = false;
+
+        foreach ($cached as $bundle) {
+            if (!isset($bundle['url'], $bundle['as'])) {
+                $changed = true;
+                continue;
             }
 
-            if (!empty($headers)) {
-                header('Link: ' . implode(', ', $headers));
-                self::$headersSent = true;
+            // Файла нет на диске → бандл пересобран с новым хешем,
+            // запись в APCu устарела. Не отправляем preload (404 в консоли).
+            if (empty($bundle['file']) || !is_file($bundle['file'])) {
+                $changed = true;
+                continue;
             }
+
+            $headers[] = "<{$bundle['url']}>; rel=preload; as={$bundle['as']}";
+            $valid[]   = $bundle;
+        }
+
+        // Чистим APCu один раз — при первом запросе после пересборки.
+        // Дальше is_file гоняется только по валидным записям.
+        if ($changed) {
+            \apcu_store($apcuKey, $valid, 86400);
+        }
+
+        if (!empty($headers)) {
+            header('Link: ' . implode(', ', $headers));
+            self::$headersSent = true;
         }
     }
 
-    public function registerBundleForLearning(string $cacheKey, string $type, string $url, int $size): void
-    {
+    /**
+     * @param string $file Абсолютный путь к файлу бандла на диске.
+     *                     Нужен, чтобы при следующем sendCachedPreloads()
+     *                     отсеять записи для пересобранных (удалённых) бандлов.
+     */
+    public function registerBundleForLearning(
+        string $cacheKey,
+        string $type,
+        string $url,
+        int $size,
+        string $file
+    ): void {
         if (!$this->enabled || !$this->currentTemplate) {
             return;
         }
 
-        $asType = $type === 'css' ? 'style' : 'script';
+        $asType  = $type === 'css' ? 'style' : 'script';
         $apcuKey = 'sab_template_' . md5($this->currentTemplate);
 
         $bundles = \apcu_fetch($apcuKey) ?: [];
 
-        // Используем ассоциативный массив для быстрой проверки существования
         $bundlesByKey = [];
         foreach ($bundles as $bundle) {
             $bundlesByKey[$bundle['cache_key']] = $bundle;
         }
 
-        // Добавляем только если еще не существует
         if (!isset($bundlesByKey[$cacheKey])) {
             $bundlesByKey[$cacheKey] = [
-                'url' => $url,
-                'as' => $asType,
+                'url'       => $url,
+                'as'        => $asType,
                 'cache_key' => $cacheKey,
-                'size' => $size,
-                'type' => $type,
+                'type'      => $type,
+                'file'      => $file,
             ];
 
             \apcu_store($apcuKey, array_values($bundlesByKey), 86400);
